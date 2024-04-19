@@ -1,9 +1,29 @@
+use event_listener::{Event, EventBUS};
 use rand::Rng;
 mod event_listener;
 trait Card {}
 
+trait CardContainer<T: Card> {
+    fn cards(&self) -> &Vec<T>;
+    fn cards_mut(&mut self) -> &mut Vec<T>;
+    fn add(&mut self, card: T) {
+        self.cards_mut().push(card);
+    }
+    fn draw(&mut self) -> Option<T> {
+        self.cards_mut().pop()
+    }
+}
+
 struct Deck<T: Card> {
     cards: Vec<T>,
+}
+impl<T: Card> CardContainer<T> for Deck<T> {
+    fn cards(&self) -> &Vec<T> {
+        &self.cards
+    }
+    fn cards_mut(&mut self) -> &mut Vec<T> {
+        &mut self.cards
+    }
 }
 impl<T: Card> Deck<T> {
     const fn new(cards: Vec<T>) -> Self {
@@ -18,14 +38,6 @@ impl<T: Card> Deck<T> {
         }
     }
 
-    fn draw(&mut self) -> Option<T> {
-        self.cards.pop()
-    }
-
-    fn add_top(&mut self, card: T) {
-        self.cards.push(card);
-    }
-
     fn add_bottom(&mut self, card: T) {
         self.cards.insert(0, card);
     }
@@ -34,33 +46,75 @@ impl<T: Card> Deck<T> {
 struct DiscardPile<T: Card> {
     cards: Vec<T>,
 }
+impl<T: Card> CardContainer<T> for DiscardPile<T> {
+    fn cards(&self) -> &Vec<T> {
+        &self.cards
+    }
+    fn cards_mut(&mut self) -> &mut Vec<T> {
+        &mut self.cards
+    }
+}
 impl<T: Card> DiscardPile<T> {
     const fn new() -> Self {
         DiscardPile { cards: Vec::new() }
-    }
-
-    fn add(&mut self, card: T) {
-        self.cards.push(card);
     }
 }
 
 struct Hand<T: Card> {
     cards: Vec<T>,
 }
+impl<T: Card> CardContainer<T> for Hand<T> {
+    fn cards(&self) -> &Vec<T> {
+        &self.cards
+    }
+    fn cards_mut(&mut self) -> &mut Vec<T> {
+        &mut self.cards
+    }
+}
 impl<T: Card> Hand<T> {
     const fn new() -> Self {
         Hand { cards: Vec::new() }
     }
 
-    fn draw(&mut self, deck: &mut Deck<T>) -> Option<&T> {
+    fn draw_from_deck<D: CardContainer<T>>(&mut self, deck: &mut D) -> Option<&T> {
         if let Some(card) = deck.draw() {
-            self.cards.push(card);
+            self.add(card);
             self.cards.last()
         } else {
             None
         }
     }
 }
+
+struct PlayArea<T: Card> {
+    cards: Vec<T>,
+}
+impl<T: Card> CardContainer<T> for PlayArea<T> {
+    fn cards(&self) -> &Vec<T> {
+        &self.cards
+    }
+    fn cards_mut(&mut self) -> &mut Vec<T> {
+        &mut self.cards
+    }
+}
+impl<T: Card> PlayArea<T> {
+    const fn new() -> Self {
+        PlayArea { cards: Vec::new() }
+    }
+
+    fn play(&mut self, card: T, bus: &EventBUS<CardTimings<'_, T>>) {
+        {
+            let c = CardTimings::Play(&card);
+            bus.send(&c);
+        }
+        self.add(card)
+    }
+}
+
+enum CardTimings<'a, T: Card> {
+    Play(&'a T),
+}
+impl<T: Card> Event for CardTimings<'_, T> {}
 
 #[cfg(test)]
 mod tests {
@@ -93,7 +147,7 @@ mod tests {
     }
     impl Card for PlayingCard {}
 
-    fn deck() -> Deck<PlayingCard> {
+    fn new_deck() -> Deck<PlayingCard> {
         Deck::new(vec![
             PlayingCard {
                 suit: Suit::Clubs,
@@ -308,8 +362,26 @@ mod tests {
 
     #[test]
     fn black_jack() {
-        let mut deck = deck();
+        let initial_blind_size = 2;
+
+        let mut deck = new_deck();
         deck.shuffle();
         deck.shuffle();
+
+        let mut blind = PlayArea::new();
+        for _ in 0..initial_blind_size {
+            match deck.draw() {
+                Some(card) => {
+                    blind.play(card);
+                }
+                None => {
+                    deck = new_deck();
+                    deck.shuffle();
+                    deck.shuffle();
+
+                    blind.play(card);
+                }
+            }
+        }
     }
 }

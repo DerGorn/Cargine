@@ -1,26 +1,26 @@
-trait Event {}
+pub trait Event {}
 
-struct EventListener<T: Event> {
+pub struct EventBUS<T: Event> {
     listeners: Vec<Option<Box<dyn Fn(&T) + Send>>>,
 }
-impl<T: Event> EventListener<T> {
-    fn new() -> Self {
-        EventListener {
+impl<T: Event> EventBUS<T> {
+    pub fn new() -> Self {
+        EventBUS {
             listeners: Vec::new(),
         }
     }
 
-    fn add_listener<F: Fn(&T) + Send + 'static>(&mut self, listener: F) -> usize {
+    pub fn add_listener<F: Fn(&T) + Send + 'static>(&mut self, listener: F) -> usize {
         let index = self.listeners.len();
         self.listeners.push(Some(Box::new(listener)));
         index
     }
 
-    fn remove_listener(&mut self, index: usize) {
+    pub fn remove_listener(&mut self, index: usize) {
         self.listeners[index] = None;
     }
 
-    fn fire(&self, event: &T) {
+    pub fn send(&self, event: &T) {
         for listener in &self.listeners {
             if let Some(listener) = listener {
                 listener(event);
