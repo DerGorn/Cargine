@@ -1,7 +1,9 @@
+use std::hash::Hash;
+
 use event_listener::{Event, EventBUS};
-use rand::Rng;
+use rand::{Rng, SeedableRng};
 mod event_listener;
-trait Card {}
+trait Card: Clone + Default {}
 
 trait CardContainer<T: Card> {
     fn cards(&self) -> &Vec<T>;
@@ -32,6 +34,14 @@ impl<T: Card> Deck<T> {
 
     fn shuffle(&mut self) {
         let mut rng = rand::thread_rng();
+        for i in (1..self.cards.len()).rev() {
+            let j = rng.gen_range(0..=i);
+            self.cards.swap(i, j);
+        }
+    }
+
+    fn seeded_shuffle(&mut self, seed: &[u8; 32]) {
+        let mut rng = rand::rngs::StdRng::from_seed(*seed);
         for i in (1..self.cards.len()).rev() {
             let j = rng.gen_range(0..=i);
             self.cards.swap(i, j);
@@ -102,30 +112,56 @@ impl<T: Card> PlayArea<T> {
         PlayArea { cards: Vec::new() }
     }
 
-    fn play(&mut self, card: T, bus: &EventBUS<CardTimings<'_, T>>) {
+    fn play(&mut self, card: T, bus: &EventBUS<CardTimings<T>>) {
         {
-            let c = CardTimings::Play(&card);
+            let c = CardTimings::Play(card.clone());
             bus.send(&c);
         }
         self.add(card)
     }
 }
 
-enum CardTimings<'a, T: Card> {
-    Play(&'a T),
+enum CardTimings<T: Card> {
+    Play(T),
+    Draw(T),
 }
-impl<T: Card> Event for CardTimings<'_, T> {}
+impl<T: Card> PartialEq for CardTimings<T> {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            Self::Play(_) => match other {
+                Self::Play(_) => true,
+                _ => false,
+            },
+            Self::Draw(_) => match other {
+                Self::Draw(_) => true,
+                _ => false,
+            },
+        }
+    }
+}
+impl<T: Card> Eq for CardTimings<T> {}
+impl<T: Card> Hash for CardTimings<T> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        match self {
+            Self::Play(_) => "Play".hash(state),
+            Self::Draw(_) => "Draw".hash(state),
+        }
+    }
+}
+impl<T: Card> Event for CardTimings<T> {}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    #[derive(Clone, Debug)]
     enum Suit {
         Clubs,
         Diamonds,
         Hearts,
         Spades,
     }
+    #[derive(Clone, Debug)]
     enum Rank {
         Ace,
         Two,
@@ -141,6 +177,7 @@ mod tests {
         Queen,
         King,
     }
+    #[derive(Clone, Debug)]
     struct PlayingCard {
         suit: Suit,
         rank: Rank,
@@ -359,29 +396,55 @@ mod tests {
             },
         ])
     }
+    impl Default for PlayingCard {
+        fn default() -> Self {
+            Self {
+                suit: Suit::Clubs,
+                rank: Rank::Ace,
+            }
+        }
+    }
 
     #[test]
     fn black_jack() {
         let initial_blind_size = 2;
+        let seed = [0; 32];
+
+        let mut bus: EventBUS<CardTimings<PlayingCard>> = EventBUS::new();
+        bus.add_listener(CardTimings::Play(PlayingCard::default()), |timing_event, _| {
+            match timing_event {
+                CardTimings::Play(card) => {
+                    println!("{:?}", card)
+                }
+                _ => unreachable!("SHOULD ONLY RECEIVE PLAY EVENTS")
+            }
+        });
 
         let mut deck = new_deck();
-        deck.shuffle();
-        deck.shuffle();
+        deck.seeded_shuffle(&seed);
 
         let mut blind = PlayArea::new();
-        for _ in 0..initial_blind_size {
+        bus.add_listener(CardTimings::Draw(PlayingCard::default()), |timing_event, bus| {
+            match timing_event {
+                CardTimings::Draw(card) => {
+                    blind.play(card.clone(), bus)
+                }
+                _ => unreachable!()
+            }
+        });
+        let mut i = 0;
+        while i < initial_blind_size {
             match deck.draw() {
                 Some(card) => {
-                    blind.play(card);
+                    bus.send(&CardTimings::Draw(card));
+                    i += 1;
                 }
                 None => {
                     deck = new_deck();
-                    deck.shuffle();
-                    deck.shuffle();
-
-                    blind.play(card);
+                    deck.seeded_shuffle(&seed);
                 }
             }
         }
+        panic!("")
     }
 }

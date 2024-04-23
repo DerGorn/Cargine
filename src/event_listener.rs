@@ -1,29 +1,37 @@
-pub trait Event {}
+use std::{collections::HashMap, hash::Hash};
+
+pub trait Event: Eq + Hash {}
 
 pub struct EventBUS<T: Event> {
-    listeners: Vec<Option<Box<dyn Fn(&T) + Send>>>,
+    listeners: HashMap<T, Vec<Option<Box<dyn Fn(&T, &Self)>>>>,
 }
 impl<T: Event> EventBUS<T> {
     pub fn new() -> Self {
         EventBUS {
-            listeners: Vec::new(),
+            listeners: HashMap::new(),
         }
     }
 
-    pub fn add_listener<F: Fn(&T) + Send + 'static>(&mut self, listener: F) -> usize {
+    pub fn add_listener<F: Fn(&T, &Self) + 'static>(&mut self, event: T, listener: F) -> usize {
         let index = self.listeners.len();
-        self.listeners.push(Some(Box::new(listener)));
+        match self.listeners.get_mut(&event) {
+            Some(v) => v.push(Some(Box::new(listener))),
+            None => {
+                self.listeners.insert(event, vec![Some(Box::new(listener))]);
+            }
+        };
+
         index
     }
 
-    pub fn remove_listener(&mut self, index: usize) {
-        self.listeners[index] = None;
+    pub fn remove_listener(&mut self, event: T, index: usize) {
+        self.listeners.get_mut(&event).unwrap()[index] = None;
     }
 
     pub fn send(&self, event: &T) {
-        for listener in &self.listeners {
+        for listener in &self.listeners[event] {
             if let Some(listener) = listener {
-                listener(event);
+                listener(event, self);
             }
         }
     }
